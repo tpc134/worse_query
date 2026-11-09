@@ -10,7 +10,7 @@ on:
 jobs:
   build:
     name: Build unsigned IPA
-    runs-on: macos-15 # 使用最新的 macOS 运行机环境
+    runs-on: macos-15
 
     steps:
       - name: Checkout
@@ -20,7 +20,6 @@ jobs:
 
       - name: Select Latest Xcode
         run: |
-          # 查找本机预装的最高版本 Xcode 并激活
           LATEST_XCODE=$(ls -d /Applications/Xcode_* 2>/dev/null | sort -V | tail -n 1)
           if [ -n "$LATEST_XCODE" ]; then
             echo "Selecting $LATEST_XCODE"
@@ -28,10 +27,15 @@ jobs:
           fi
           xcodebuild -version
 
-      - name: Build App (Unsigned)
+      - name: Fix Xcode Project Version & Build
         env:
           SCHEME_NAME: "worse_query"
         run: |
+          # 自动降级工程版本号，彻底解决 (110) 兼容性报错
+          find . -name "project.pbxproj" -exec sed -i '' -E 's/objectVersion = [0-9]+/objectVersion = 60/g' {} +
+          find . -name "project.pbxproj" -exec sed -i '' -E 's/preferredProjectObjectVersion = [0-9]+/preferredProjectObjectVersion = 60/g' {} +
+
+          # 自动识别 workspace 或 xcodeproj
           if [ -n "$(find . -maxdepth 2 -name '*.xcworkspace' -print -quit)" ]; then
             BUILD_PATH=$(find . -maxdepth 2 -name '*.xcworkspace' -print -quit)
             FLAG="-workspace"
@@ -40,6 +44,10 @@ jobs:
             FLAG="-project"
           fi
 
+          echo "Target File: $BUILD_PATH"
+          echo "Scheme: $SCHEME_NAME"
+
+          # 编译 Release 真机架构并完全关闭代码签名
           xcodebuild clean build \
             $FLAG "$BUILD_PATH" \
             -scheme "$SCHEME_NAME" \
@@ -59,11 +67,11 @@ jobs:
             exit 1
           fi
           cp -r "$APP_PATH" Payload/
-          zip -r -9 "output.ipa" Payload/
+          zip -r -9 "worse_query.ipa" Payload/
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-ipa
-          path: output.ipa
+          name: worse_query-ipa
+          path: worse_query.ipa
           if-no-files-found: error
