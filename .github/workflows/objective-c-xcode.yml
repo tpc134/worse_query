@@ -5,7 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch: # 支持在 GitHub 网页端手动点击按钮触发
+  workflow_dispatch:
 
 jobs:
   build:
@@ -15,27 +15,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set Default Scheme
-        run: |
-          scheme_list=$(xcodebuild -list -json | tr -d "\n")
-          # 优先匹配 schemes，若无则回退到 targets
-          default=$(echo $scheme_list | ruby -e "require 'json'; data = JSON.parse(STDIN.gets); puts ((data['project']['schemes'] && data['project']['schemes'][0]) || data['project']['targets'][0])")
-          echo $default | cat >default
-          echo "Using default scheme: $default"
+        with:
+          submodules: recursive # 避免依赖的子模块缺失
 
       - name: Build App (Unsigned)
         env:
-          scheme: ${{ 'default' }}
+          # ===== 请在此处直接填入你的实际 Scheme / Target 名称 =====
+          SCHEME_NAME: "worse_query"
         run: |
-          if [ $scheme = default ]; then scheme=$(cat default); fi
-          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
-          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
+          # 自动识别工程类型：优先使用 workspace，若无则使用 xcodeproj
+          if [ -n "$(find . -maxdepth 2 -name '*.xcworkspace' -print -quit)" ]; then
+            BUILD_PATH=$(find . -maxdepth 2 -name '*.xcworkspace' -print -quit)
+            FLAG="-workspace"
+          else
+            BUILD_PATH=$(find . -maxdepth 2 -name '*.xcodeproj' -print -quit)
+            FLAG="-project"
+          fi
 
-          # 编译真机 Release 架构并关闭代码签名
+          echo "Target File: $BUILD_PATH"
+          echo "Scheme: $SCHEME_NAME"
+
+          # 编译 Release 真机产物并强制关闭签名
           xcodebuild clean build \
-            -scheme "$scheme" \
-            -"$filetype_parameter" "$file_to_build" \
+            $FLAG "$BUILD_PATH" \
+            -scheme "$SCHEME_NAME" \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
@@ -45,16 +48,19 @@ jobs:
 
       - name: Package to IPA
         run: |
-          scheme=$(cat default)
           mkdir -p Payload
-          # 将编译产出的 .app 拷贝进 Payload
-          cp -r build/Build/Products/Release-iphoneos/*.app Payload/
-          # 打包为 .ipa
-          zip -r -9 "${scheme}.ipa" Payload/
+          # 提取编译输出的 .app 目录
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 1 -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: .app file not found!"
+            exit 1
+          fi
+          cp -r "$APP_PATH" Payload/
+          zip -r -9 "output.ipa" Payload/
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-ipa
-          path: "*.ipa"
+          path: output.ipa
           if-no-files-found: error
