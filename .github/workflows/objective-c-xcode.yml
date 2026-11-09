@@ -31,7 +31,7 @@ jobs:
         env:
           SCHEME_NAME: "worse_query"
           # 在此处设置你期望的系统目标版本（如 16.0 或 15.0）
-          TARGET_IOS_VERSION: "16.0"
+          TARGET_IOS_VERSION: "18.0"
         run: |
           # 1. 降级 Xcode 工程格式，避免 (110) 兼容报错
           find . -name "project.pbxproj" -exec sed -i '' -E 's/objectVersion = [0-9]+/objectVersion = 60/g' {} +
