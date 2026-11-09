@@ -10,20 +10,28 @@ on:
 jobs:
   build:
     name: Build unsigned IPA
-    runs-on: macos-latest
+    runs-on: macos-15 # 使用最新的 macOS 运行机环境
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive # 避免依赖的子模块缺失
+          submodules: recursive
+
+      - name: Select Latest Xcode
+        run: |
+          # 查找本机预装的最高版本 Xcode 并激活
+          LATEST_XCODE=$(ls -d /Applications/Xcode_* 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$LATEST_XCODE" ]; then
+            echo "Selecting $LATEST_XCODE"
+            sudo xcode-select -s "$LATEST_XCODE"
+          fi
+          xcodebuild -version
 
       - name: Build App (Unsigned)
         env:
-          # ===== 请在此处直接填入你的实际 Scheme / Target 名称 =====
           SCHEME_NAME: "worse_query"
         run: |
-          # 自动识别工程类型：优先使用 workspace，若无则使用 xcodeproj
           if [ -n "$(find . -maxdepth 2 -name '*.xcworkspace' -print -quit)" ]; then
             BUILD_PATH=$(find . -maxdepth 2 -name '*.xcworkspace' -print -quit)
             FLAG="-workspace"
@@ -32,10 +40,6 @@ jobs:
             FLAG="-project"
           fi
 
-          echo "Target File: $BUILD_PATH"
-          echo "Scheme: $SCHEME_NAME"
-
-          # 编译 Release 真机产物并强制关闭签名
           xcodebuild clean build \
             $FLAG "$BUILD_PATH" \
             -scheme "$SCHEME_NAME" \
@@ -49,7 +53,6 @@ jobs:
       - name: Package to IPA
         run: |
           mkdir -p Payload
-          # 提取编译输出的 .app 目录
           APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 1 -print -quit)
           if [ -z "$APP_PATH" ]; then
             echo "Error: .app file not found!"
