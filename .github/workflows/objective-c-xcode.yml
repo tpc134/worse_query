@@ -1,0 +1,60 @@
+name: Xcode - Build Unsigned IPA
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch: # 支持在 GitHub 网页端手动点击按钮触发
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set Default Scheme
+        run: |
+          scheme_list=$(xcodebuild -list -json | tr -d "\n")
+          # 优先匹配 schemes，若无则回退到 targets
+          default=$(echo $scheme_list | ruby -e "require 'json'; data = JSON.parse(STDIN.gets); puts ((data['project']['schemes'] && data['project']['schemes'][0]) || data['project']['targets'][0])")
+          echo $default | cat >default
+          echo "Using default scheme: $default"
+
+      - name: Build App (Unsigned)
+        env:
+          scheme: ${{ 'default' }}
+        run: |
+          if [ $scheme = default ]; then scheme=$(cat default); fi
+          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
+          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
+
+          # 编译真机 Release 架构并关闭代码签名
+          xcodebuild clean build \
+            -scheme "$scheme" \
+            -"$filetype_parameter" "$file_to_build" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package to IPA
+        run: |
+          scheme=$(cat default)
+          mkdir -p Payload
+          # 将编译产出的 .app 拷贝进 Payload
+          cp -r build/Build/Products/Release-iphoneos/*.app Payload/
+          # 打包为 .ipa
+          zip -r -9 "${scheme}.ipa" Payload/
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-ipa
+          path: "*.ipa"
+          if-no-files-found: error
