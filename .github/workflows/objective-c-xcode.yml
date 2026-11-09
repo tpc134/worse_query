@@ -12,6 +12,11 @@ jobs:
     name: Build unsigned IPA
     runs-on: macos-15
 
+    # 全局环境变量：修改此处即可全局同步
+    env:
+      SCHEME_NAME: "worse_query"
+      TARGET_IOS_VERSION: "18.0"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,19 +33,14 @@ jobs:
           xcodebuild -version
 
       - name: Fix Xcode Project Version & Build
-        env:
-          SCHEME_NAME: "worse_query"
-          # 在此处设置你期望的系统目标版本（如 16.0 或 15.0）
-          TARGET_IOS_VERSION: "18.0"
         run: |
-          # 1. 降级 Xcode 工程格式，避免 (110) 兼容报错
+          # 降级工程内部格式
           find . -name "project.pbxproj" -exec sed -i '' -E 's/objectVersion = [0-9]+/objectVersion = 60/g' {} +
           find . -name "project.pbxproj" -exec sed -i '' -E 's/preferredProjectObjectVersion = [0-9]+/preferredProjectObjectVersion = 60/g' {} +
 
-          # 2. 批量将工程所有配置文件中的目标版本强行替换为指定版本
+          # 替换工程内定义的 Deployment Target
           find . -name "project.pbxproj" -exec sed -i '' -E "s/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]+/IPHONEOS_DEPLOYMENT_TARGET = ${TARGET_IOS_VERSION}/g" {} +
 
-          # 自动识别工程类型
           if [ -n "$(find . -maxdepth 2 -name '*.xcworkspace' -print -quit)" ]; then
             BUILD_PATH=$(find . -maxdepth 2 -name '*.xcworkspace' -print -quit)
             FLAG="-workspace"
@@ -49,7 +49,7 @@ jobs:
             FLAG="-project"
           fi
 
-          # 3. 编译时显式传入部署版本
+          # 编译 Release 真机产物
           xcodebuild clean build \
             $FLAG "$BUILD_PATH" \
             -scheme "$SCHEME_NAME" \
@@ -62,8 +62,6 @@ jobs:
             CODE_SIGN_IDENTITY=""
 
       - name: Package to IPA
-        env:
-          TARGET_IOS_VERSION: "16.0"
         run: |
           mkdir -p Payload
           APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 1 -print -quit)
@@ -73,10 +71,10 @@ jobs:
           fi
           cp -r "$APP_PATH" Payload/
 
-          # 核心修复：强制将生成的 Info.plist 内的 MinimumOSVersion 修改为目标版本
+          # 确保 Info.plist 的 MinimumOSVersion 严格对齐全局变量
           INFO_PLIST="Payload/$(basename "$APP_PATH")/Info.plist"
           if [ -f "$INFO_PLIST" ]; then
-            echo "Modifying MinimumOSVersion in $INFO_PLIST to $TARGET_IOS_VERSION"
+            echo "Setting MinimumOSVersion to $TARGET_IOS_VERSION"
             plutil -replace MinimumOSVersion -string "$TARGET_IOS_VERSION" "$INFO_PLIST"
           fi
 
